@@ -18,6 +18,7 @@ package builder
 
 import (
 	"fmt"
+	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -458,7 +459,221 @@ func (b *ResourceBuilder) BuildDatabaseReplicaStatefulSet(ms *musicv1.MusicServi
 	}
 }
 
-// BuildDatabaseMasterService xây dựng Service master của cơ sở dữ liệu
+// BuildDatabaseGaleraStatefulSet xây dựng StatefulSet Galera Cluster, nơi tất cả các node ngang hàng
+// Tất cả replicas đều có thể được đưa lên làm primary khi node hiện tại chết
+func (b *ResourceBuilder) BuildDatabaseGaleraStatefulSet(ms *musicv1.MusicService) *appsv1.StatefulSet {
+	labels := b.getLabels(ms, "db-galera")
+	podLabels := map[string]string{
+		"app":       ms.Name,
+		"component": "db-galera",
+	}
+
+	config := buildDatabaseConfig(ms)
+	// 1 initial primary node + configured replica count
+	totalReplicas := config.replicas + 1
+	stsName := ms.Name + "-db-galera"
+
+	configScript := buildGaleraConfigScript(stsName, ms.Namespace, int(totalReplicas))
+
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      stsName,
+			Namespace: ms.Namespace,
+			Labels:    labels,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(ms, musicv1.GroupVersion.WithKind("MusicService")),
+			},
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas:    &totalReplicas,
+			ServiceName: stsName,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: podLabels,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: podLabels,
+				},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{
+							Name:    "init-galera-config",
+							Image:   config.image,
+							Command: []string{"/bin/sh", "-c", configScript},
+							Env: []corev1.EnvVar{
+								{
+									Name: "POD_NAME",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"},
+									},
+								},
+								{
+									Name: "POD_IP",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"},
+									},
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: "db-config", MountPath: "/db-config"},
+								{Name: "db-data", MountPath: "/var/lib/mysql"},
+							},
+						},
+					},
+					Containers: []corev1.Container{
+						{
+							Name:  "mariadb",
+							Image: config.image,
+							Env: []corev1.EnvVar{
+								{Name: "MYSQL_ROOT_PASSWORD", Value: config.rootPassword},
+								{Name: "MYSQL_DATABASE", Value: "musicdb"},
+							},
+							Ports: []corev1.ContainerPort{
+								{Name: "mysql", ContainerPort: 3306, Protocol: corev1.ProtocolTCP},
+								{Name: "galera-repl", ContainerPort: 4444, Protocol: corev1.ProtocolTCP},
+								{Name: "galera-ist", ContainerPort: 4568, Protocol: corev1.ProtocolTCP},
+								{Name: "galera-sst", ContainerPort: 4567, Protocol: corev1.ProtocolTCP},
+							},
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/sh", "-c", "mysqladmin ping -uroot -p$MYSQL_ROOT_PASSWORD"},
+									},
+								},
+								InitialDelaySeconds: 10,
+								PeriodSeconds:       10,
+							},
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/sh", "-c", "mysqladmin ping -uroot -p$MYSQL_ROOT_PASSWORD"},
+									},
+								},
+								InitialDelaySeconds: 30,
+								PeriodSeconds:       20,
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: "db-data", MountPath: "/var/lib/mysql"},
+								{Name: "db-config", MountPath: "/etc/mysql/conf.d"},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "db-config",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
+							},
+						},
+					},
+				},
+			},
+			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "db-data",
+					},
+					Spec: corev1.PersistentVolumeClaimSpec{
+						AccessModes: []corev1.PersistentVolumeAccessMode{
+							corev1.ReadWriteOnce,
+						},
+						Resources: corev1.VolumeResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceStorage: config.storageSize,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// BuildDatabaseGaleraService xây dựng Headless Service cho Galera Cluster (dùng cho pod discovery)
+func (b *ResourceBuilder) BuildDatabaseGaleraService(ms *musicv1.MusicService) *corev1.Service {
+	labels := b.getLabels(ms, "db-galera")
+	stsName := ms.Name + "-db-galera"
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      stsName,
+			Namespace: ms.Namespace,
+			Labels:    labels,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(ms, musicv1.GroupVersion.WithKind("MusicService")),
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app":       ms.Name,
+				"component": "db-galera",
+			},
+			Ports: []corev1.ServicePort{
+				{Name: "mysql", Port: 3306, Protocol: corev1.ProtocolTCP},
+				{Name: "galera-repl", Port: 4444, Protocol: corev1.ProtocolTCP},
+				{Name: "galera-ist", Port: 4568, Protocol: corev1.ProtocolTCP},
+				{Name: "galera-sst", Port: 4567, Protocol: corev1.ProtocolTCP},
+			},
+			Type:                     corev1.ServiceTypeClusterIP,
+			ClusterIP:                "None",
+			PublishNotReadyAddresses: true,
+		},
+	}
+}
+
+// BuildDatabaseGaleraPrimaryService xây dựng Service write endpoint cho Galera Cluster
+// Service này trỏ đến tất cả các galera node, đảm bảo không gián đoạn khi có node chết
+func (b *ResourceBuilder) BuildDatabaseGaleraPrimaryService(ms *musicv1.MusicService) *corev1.Service {
+	labels := b.getLabels(ms, "db-primary")
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ms.Name + "-db-master",
+			Namespace: ms.Namespace,
+			Labels:    labels,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(ms, musicv1.GroupVersion.WithKind("MusicService")),
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app":       ms.Name,
+				"component": "db-galera",
+			},
+			Ports: []corev1.ServicePort{
+				{Name: "mysql", Port: 3306, Protocol: corev1.ProtocolTCP},
+			},
+			Type: corev1.ServiceTypeClusterIP,
+		},
+	}
+}
+
+// BuildDatabaseGaleraReadService xây dựng Service đọc cho Galera Cluster
+func (b *ResourceBuilder) BuildDatabaseGaleraReadService(ms *musicv1.MusicService) *corev1.Service {
+	labels := b.getLabels(ms, "db-read")
+
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ms.Name + "-db-read",
+			Namespace: ms.Namespace,
+			Labels:    labels,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(ms, musicv1.GroupVersion.WithKind("MusicService")),
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{
+				"app":       ms.Name,
+				"component": "db-galera",
+			},
+			Ports: []corev1.ServicePort{
+				{Name: "mysql", Port: 3306, Protocol: corev1.ProtocolTCP},
+			},
+			Type: corev1.ServiceTypeClusterIP,
+		},
+	}
+}
+
 func (b *ResourceBuilder) BuildDatabaseMasterService(ms *musicv1.MusicService) *corev1.Service {
 	labels := b.getLabels(ms, "db-master")
 
@@ -760,4 +975,45 @@ func buildReplicaSetupContainer(config databaseConfig, script string) []corev1.C
 			},
 		},
 	}
+}
+
+// buildGaleraConfigScript tạo script init container để cấu hình Galera Cluster cho mỗi pod
+// Pod-0 sẽ bootstrap cluster khi chưa có data; các pod khác luôn join cluster hiện có
+func buildGaleraConfigScript(stsName, namespace string, totalReplicas int) string {
+	members := make([]string, totalReplicas)
+	for i := 0; i < totalReplicas; i++ {
+		members[i] = fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local", stsName, i, stsName, namespace)
+	}
+	clusterMembers := strings.Join(members, ",")
+
+	return fmt.Sprintf(`
+set -e
+ORDINAL=${POD_NAME##*-}
+SERVER_ID=$((100 + ORDINAL))
+GRASTATE_FILE="/var/lib/mysql/grastate.dat"
+
+if [ "$ORDINAL" = "0" ] && [ ! -f "$GRASTATE_FILE" ]; then
+  WSREP_CLUSTER_ADDRESS="gcomm://"
+else
+  WSREP_CLUSTER_ADDRESS="gcomm://%s"
+fi
+
+cat <<EOF > /db-config/galera.cnf
+[mysqld]
+server-id=${SERVER_ID}
+wsrep_on=ON
+wsrep_provider=/usr/lib/galera/libgalera_smm.so
+wsrep_cluster_name=%s
+wsrep_cluster_address=${WSREP_CLUSTER_ADDRESS}
+wsrep_node_name=${POD_NAME}
+wsrep_node_address=${POD_IP}
+wsrep_sst_method=rsync
+binlog_format=ROW
+default_storage_engine=InnoDB
+innodb_autoinc_lock_mode=2
+log_bin=mysql-bin
+gtid_strict_mode=ON
+log_slave_updates=ON
+EOF
+`, clusterMembers, stsName)
 }

@@ -135,16 +135,27 @@ func (r *MusicServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			musicService.Status.Database = &musicv1.DatabaseStatus{}
 		}
 
-		if err := r.databaseReconciler.ReconcileMaster(ctx, musicService); err != nil {
-			return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBMasterFailed", err.Error())
-		}
+		if databaseHAEnabled(musicService) {
+			// Chế độ Galera Cluster: tất cả node ngang hàng, không gián đoạn khi master chết
+			if err := r.databaseReconciler.ReconcileGalera(ctx, musicService); err != nil {
+				return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBGaleraFailed", err.Error())
+			}
+			if err := r.databaseReconciler.ReconcileGaleraServices(ctx, musicService); err != nil {
+				return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBGaleraServicesFailed", err.Error())
+			}
+		} else {
+			// Chế độ master/replica truyền thống
+			if err := r.databaseReconciler.ReconcileMaster(ctx, musicService); err != nil {
+				return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBMasterFailed", err.Error())
+			}
 
-		if err := r.databaseReconciler.ReconcileReplicas(ctx, musicService); err != nil {
-			return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBReplicasFailed", err.Error())
-		}
+			if err := r.databaseReconciler.ReconcileReplicas(ctx, musicService); err != nil {
+				return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBReplicasFailed", err.Error())
+			}
 
-		if err := r.databaseReconciler.ReconcileServices(ctx, musicService); err != nil {
-			return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBServicesFailed", err.Error())
+			if err := r.databaseReconciler.ReconcileServices(ctx, musicService); err != nil {
+				return ctrl.Result{}, r.statusManager.UpdateError(ctx, musicService, "DBServicesFailed", err.Error())
+			}
 		}
 
 		if err := r.databaseReconciler.ReconcileAutoscaler(ctx, musicService); err != nil {
@@ -206,4 +217,10 @@ func (r *MusicServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func databaseEnabled(ms *musicv1.MusicService) bool {
 	return ms.Spec.Database != nil && ms.Spec.Database.Enabled
+}
+
+func databaseHAEnabled(ms *musicv1.MusicService) bool {
+	return ms.Spec.Database != nil &&
+		ms.Spec.Database.HighAvailability != nil &&
+		ms.Spec.Database.HighAvailability.Enabled
 }

@@ -223,6 +223,148 @@ func TestResourceBuilder(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "BuildDatabaseGaleraStatefulSet creates Galera Cluster StatefulSet",
+			ms: &musicv1.MusicService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ha",
+					Namespace: "default",
+				},
+				Spec: musicv1.MusicServiceSpec{
+					Database: &musicv1.DatabaseSpec{
+						Enabled:      true,
+						Replicas:     2,
+						Image:        "mariadb:10.11",
+						RootPassword: "secret",
+						Storage: &musicv1.StorageSpec{
+							Size:         "20Gi",
+							UpdatePolicy: "Recreate",
+						},
+						HighAvailability: &musicv1.DatabaseHighAvailabilitySpec{
+							Enabled: true,
+						},
+					},
+				},
+			},
+			testFn: func(t *testing.T, ms *musicv1.MusicService, rb *ResourceBuilder) {
+				sts := rb.BuildDatabaseGaleraStatefulSet(ms)
+
+				if sts == nil {
+					t.Fatal("BuildDatabaseGaleraStatefulSet returned nil")
+				}
+
+				if sts.Name != "test-ha-db-galera" {
+					t.Errorf("expected name test-ha-db-galera, got %s", sts.Name)
+				}
+
+				// totalReplicas = replicas (2) + 1 = 3
+				if *sts.Spec.Replicas != 3 {
+					t.Errorf("expected 3 replicas (1 primary + 2), got %d", *sts.Spec.Replicas)
+				}
+
+				// Headless service name must match StatefulSet name
+				if sts.Spec.ServiceName != "test-ha-db-galera" {
+					t.Errorf("expected headless service name test-ha-db-galera, got %s", sts.Spec.ServiceName)
+				}
+
+				// Verify Galera ports are exposed
+				if len(sts.Spec.Template.Spec.Containers) == 0 {
+					t.Fatal("no containers in Galera StatefulSet")
+				}
+				container := sts.Spec.Template.Spec.Containers[0]
+				portNames := make(map[string]bool)
+				for _, p := range container.Ports {
+					portNames[p.Name] = true
+				}
+				for _, expected := range []string{"mysql", "galera-repl", "galera-ist", "galera-sst"} {
+					if !portNames[expected] {
+						t.Errorf("expected Galera port %s to be present", expected)
+					}
+				}
+
+				// Verify init container exists for Galera config
+				if len(sts.Spec.Template.Spec.InitContainers) == 0 {
+					t.Fatal("no init containers in Galera StatefulSet")
+				}
+				if sts.Spec.Template.Spec.InitContainers[0].Name != "init-galera-config" {
+					t.Errorf("expected init container name init-galera-config, got %s", sts.Spec.Template.Spec.InitContainers[0].Name)
+				}
+
+				// Verify component label is db-galera
+				if sts.Spec.Template.Labels["component"] != "db-galera" {
+					t.Errorf("expected component label db-galera, got %s", sts.Spec.Template.Labels["component"])
+				}
+			},
+		},
+		{
+			name: "BuildDatabaseGaleraService creates headless service",
+			ms: &musicv1.MusicService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ha",
+					Namespace: "default",
+				},
+				Spec: musicv1.MusicServiceSpec{
+					Database: &musicv1.DatabaseSpec{
+						Enabled: true,
+					},
+				},
+			},
+			testFn: func(t *testing.T, ms *musicv1.MusicService, rb *ResourceBuilder) {
+				svc := rb.BuildDatabaseGaleraService(ms)
+
+				if svc == nil {
+					t.Fatal("BuildDatabaseGaleraService returned nil")
+				}
+
+				if svc.Name != "test-ha-db-galera" {
+					t.Errorf("expected name test-ha-db-galera, got %s", svc.Name)
+				}
+
+				if svc.Spec.ClusterIP != "None" {
+					t.Errorf("expected headless service (ClusterIP=None), got %s", svc.Spec.ClusterIP)
+				}
+
+				if !svc.Spec.PublishNotReadyAddresses {
+					t.Error("expected PublishNotReadyAddresses=true for Galera cluster discovery")
+				}
+			},
+		},
+		{
+			name: "BuildDatabaseGaleraPrimaryService creates HA write service",
+			ms: &musicv1.MusicService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ha",
+					Namespace: "default",
+				},
+				Spec: musicv1.MusicServiceSpec{
+					Database: &musicv1.DatabaseSpec{
+						Enabled: true,
+					},
+				},
+			},
+			testFn: func(t *testing.T, ms *musicv1.MusicService, rb *ResourceBuilder) {
+				svc := rb.BuildDatabaseGaleraPrimaryService(ms)
+
+				if svc == nil {
+					t.Fatal("BuildDatabaseGaleraPrimaryService returned nil")
+				}
+
+				// Uses same name as master service for backward compatibility
+				if svc.Name != "test-ha-db-master" {
+					t.Errorf("expected name test-ha-db-master, got %s", svc.Name)
+				}
+
+				// Must select all galera nodes (not just pod-0) for HA
+				if svc.Spec.Selector["component"] != "db-galera" {
+					t.Errorf("expected selector component=db-galera for HA, got %s", svc.Spec.Selector["component"])
+				}
+
+				// Must NOT be headless (needs load-balancing across healthy nodes)
+				if svc.Spec.ClusterIP == "None" {
+					t.Error("primary service should not be headless; must route to healthy nodes")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

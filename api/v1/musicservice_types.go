@@ -112,6 +112,11 @@ type DatabaseSpec struct {
 	// Autoscaling định nghĩa cấu hình autoscaling cho replica của cơ sở dữ liệu
 	// +optional
 	Autoscaling *AutoscalingSpec `json:"autoscaling,omitempty"`
+
+	// HighAvailability cấu hình Galera Cluster để tự động chuyển đổi dự phòng
+	// Khi bật, tất cả các node ngang hàng; nếu node master chết thì slave sẽ được đưa lên làm primary
+	// +optional
+	HighAvailability *DatabaseHighAvailabilitySpec `json:"highAvailability,omitempty"`
 }
 
 // DatabaseReplicationSpec định nghĩa cấu hình replication
@@ -123,6 +128,14 @@ type DatabaseReplicationSpec struct {
 	// GTID bật/tắt GTID replication (mặc định bật)
 	// +optional
 	GTID *bool `json:"gtid,omitempty"`
+}
+
+// DatabaseHighAvailabilitySpec cấu hình Galera Cluster để tự động chuyển đổi dự phòng
+type DatabaseHighAvailabilitySpec struct {
+	// Enabled bật chế độ Galera Cluster multi-master để tất cả các node ngang hàng
+	// Khi bật, bất kỳ node nào cũng có thể được đưa lên làm primary khi node hiện tại chết
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // DatabaseStatus định nghĩa trạng thái quan sát được của cơ sở dữ liệu
