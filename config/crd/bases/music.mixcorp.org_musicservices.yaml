@@ -1,0 +1,434 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: musicservices.music.mixcorp.org
+spec:
+  group: music.mixcorp.org
+  names:
+    kind: MusicService
+    listKind: MusicServiceList
+    plural: musicservices
+    singular: musicservice
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.replicas
+      name: Replicas
+      type: integer
+    - jsonPath: .status.readyReplicas
+      name: Ready
+      type: integer
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: MusicService là schema cho API musicservices
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MusicServiceSpec định nghĩa trạng thái mong muốn của MusicService
+            properties:
+              autoscaling:
+                description: Autoscaling định nghĩa cấu hình autoscaling
+                properties:
+                  maxReplicas:
+                    description: MaxReplicas là số replica tối đa
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  minReplicas:
+                    description: MinReplicas là số replica tối thiểu
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  targetCPUUtilizationPercentage:
+                    description: TargetCPUUtilizationPercentage là phần trăm sử dụng
+                      CPU mục tiêu
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  targetMemoryUtilizationPercentage:
+                    description: TargetMemoryUtilizationPercentage là phần trăm sử
+                      dụng bộ nhớ mục tiêu
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                required:
+                - maxReplicas
+                - minReplicas
+                - targetCPUUtilizationPercentage
+                type: object
+              database:
+                description: Database định nghĩa cấu hình cơ sở dữ liệu
+                properties:
+                  autoscaling:
+                    description: Autoscaling định nghĩa cấu hình autoscaling cho replica
+                      của cơ sở dữ liệu
+                    properties:
+                      maxReplicas:
+                        description: MaxReplicas là số replica tối đa
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        description: MinReplicas là số replica tối thiểu
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      targetCPUUtilizationPercentage:
+                        description: TargetCPUUtilizationPercentage là phần trăm sử
+                          dụng CPU mục tiêu
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      targetMemoryUtilizationPercentage:
+                        description: TargetMemoryUtilizationPercentage là phần trăm
+                          sử dụng bộ nhớ mục tiêu
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                    required:
+                    - maxReplicas
+                    - minReplicas
+                    - targetCPUUtilizationPercentage
+                    type: object
+                  enabled:
+                    description: Enabled cho biết có triển khai cơ sở dữ liệu hay
+                      không
+                    type: boolean
+                  image:
+                    description: Image là image container của cơ sở dữ liệu
+                    type: string
+                  replicas:
+                    description: Replicas là số lượng replica của cơ sở dữ liệu
+                    format: int32
+                    maximum: 10
+                    minimum: 0
+                    type: integer
+                  replication:
+                    description: Replication định nghĩa cấu hình replication giữa
+                      master và replica
+                    properties:
+                      enabled:
+                        description: Enabled bật/tắt replication (mặc định bật)
+                        type: boolean
+                      gtid:
+                        description: GTID bật/tắt GTID replication (mặc định bật)
+                        type: boolean
+                    type: object
+                  rootPassword:
+                    description: RootPassword là mật khẩu root của cơ sở dữ liệu (nên
+                      dùng secret trong production)
+                    type: string
+                  storage:
+                    description: Storage định nghĩa cấu hình lưu trữ của cơ sở dữ
+                      liệu
+                    properties:
+                      size:
+                        description: 'Kích thước persistent volume (ví dụ: "10Gi",
+                          "100Gi")'
+                        minLength: 1
+                        type: string
+                      updatePolicy:
+                        description: UpdatePolicy kiểm soát cách áp dụng thay đổi
+                          kích thước lưu trữ
+                        enum:
+                        - Resize
+                        - Recreate
+                        type: string
+                    required:
+                    - size
+                    type: object
+                required:
+                - enabled
+                type: object
+              image:
+                description: Image là image container cần triển khai
+                minLength: 1
+                type: string
+              port:
+                description: Port là cổng Service cho streaming nhạc
+                format: int32
+                maximum: 65535
+                minimum: 1
+                type: integer
+              replicas:
+                description: Replicas là số pod mong muốn
+                format: int32
+                maximum: 100
+                minimum: 1
+                type: integer
+              resources:
+                description: Resources định nghĩa tài nguyên tính toán cho container
+                properties:
+                  claims:
+                    description: |-
+                      Claims lists the names of resources, defined in spec.resourceClaims,
+                      that are used by this container.
+
+
+                      This is an alpha field and requires enabling the
+                      DynamicResourceAllocation feature gate.
+
+
+                      This field is immutable. It can only be set for containers.
+                    items:
+                      description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                      properties:
+                        name:
+                          description: |-
+                            Name must match the name of one entry in pod.spec.resourceClaims of
+                            the Pod where this field is used. It makes that resource available
+                            inside a container.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  limits:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Limits describes the maximum amount of compute resources allowed.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Requests describes the minimum amount of compute resources required.
+                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                      otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                type: object
+              storage:
+                description: Storage định nghĩa cấu hình lưu trữ
+                properties:
+                  size:
+                    description: 'Kích thước persistent volume (ví dụ: "10Gi", "100Gi")'
+                    minLength: 1
+                    type: string
+                  updatePolicy:
+                    description: UpdatePolicy kiểm soát cách áp dụng thay đổi kích
+                      thước lưu trữ
+                    enum:
+                    - Resize
+                    - Recreate
+                    type: string
+                required:
+                - size
+                type: object
+              streaming:
+                description: Streaming định nghĩa cấu hình streaming
+                properties:
+                  bitrate:
+                    description: 'Bitrate cho streaming âm thanh (ví dụ: "320k", "192k")'
+                    minLength: 1
+                    type: string
+                  maxConnections:
+                    description: MaxConnections là số kết nối đồng thời tối đa cho
+                      streaming
+                    format: int32
+                    maximum: 10000
+                    minimum: 1
+                    type: integer
+                required:
+                - bitrate
+                - maxConnections
+                type: object
+            required:
+            - image
+            - port
+            - replicas
+            - storage
+            - streaming
+            type: object
+          status:
+            description: MusicServiceStatus định nghĩa trạng thái quan sát được của
+              MusicService
+            properties:
+              conditions:
+                description: Conditions thể hiện các quan sát mới nhất về trạng thái
+                  của MusicService
+                items:
+                  description: "Condition contains details for one aspect of the current
+                    state of this API Resource.\n---\nThis struct is intended for
+                    direct use as an array at the field path .status.conditions.  For
+                    example,\n\n\n\ttype FooStatus struct{\n\t    // Represents the
+                    observations of a foo's current state.\n\t    // Known .status.conditions.type
+                    are: \"Available\", \"Progressing\", and \"Degraded\"\n\t    //
+                    +patchMergeKey=type\n\t    // +patchStrategy=merge\n\t    // +listType=map\n\t
+                    \   // +listMapKey=type\n\t    Conditions []metav1.Condition `json:\"conditions,omitempty\"
+                    patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"`\n\n\n\t
+                    \   // other fields\n\t}"
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        type of condition in CamelCase or in foo.example.com/CamelCase.
+                        ---
+                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions can be
+                        useful (see .node.status.conditions), the ability to deconflict is important.
+                        The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              database:
+                description: Database là trạng thái cơ sở dữ liệu nếu được bật
+                properties:
+                  masterReady:
+                    description: MasterReady cho biết master đã sẵn sàng hay chưa
+                    type: boolean
+                  phase:
+                    description: Phase biểu thị trạng thái hiện tại của cơ sở dữ liệu
+                    enum:
+                    - Pending
+                    - Progressing
+                    - Ready
+                    - Failed
+                    type: string
+                  replicaDeletionDetected:
+                    description: ReplicaDeletionDetected cho biết replica đã bị xóa
+                      sau khi từng tồn tại
+                    type: boolean
+                  replicaEverCreated:
+                    description: ReplicaEverCreated cho biết replica đã từng tồn tại
+                      hay chưa
+                    type: boolean
+                  replicaLastSeen:
+                    description: ReplicaLastSeen là thời điểm gần nhất quan sát thấy
+                      replica
+                    format: date-time
+                    type: string
+                  replicasReady:
+                    description: ReplicasReady là số replica của cơ sở dữ liệu đã
+                      sẵn sàng
+                    format: int32
+                    type: integer
+                  replicationReady:
+                    description: ReplicationReady cho biết replication giữa master/replica
+                      đã sẵn sàng
+                    type: boolean
+                type: object
+              desiredReplicas:
+                description: DesiredReplicas là số replica mong muốn trong spec
+                format: int32
+                type: integer
+              lastError:
+                description: LastError là lỗi gần nhất trong quá trình đồng bộ
+                type: string
+              lastReconcileTime:
+                description: LastReconcileTime là thời điểm gần nhất tài nguyên được
+                  đồng bộ
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration phản ánh generation mới nhất đã quan
+                  sát của MusicService
+                format: int64
+                type: integer
+              phase:
+                description: Phase biểu thị trạng thái hiện tại của MusicService (Pending,
+                  Progressing, Available, Failed)
+                enum:
+                - Pending
+                - Progressing
+                - Available
+                - Degraded
+                - Failed
+                type: string
+              readyReplicas:
+                description: ReadyReplicas là số pod đã sẵn sàng phục vụ lưu lượng
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

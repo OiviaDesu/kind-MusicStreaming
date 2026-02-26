@@ -1,0 +1,55 @@
+apiVersion: music.mixcorp.org/v1
+kind: MusicService
+metadata:
+  name: miku-stream
+  labels:
+    app.kubernetes.io/name: musicservice
+    app.kubernetes.io/instance: miku-stream
+    app.kubernetes.io/part-of: music-operator
+    app.kubernetes.io/created-by: music-operator
+spec:
+  # Field descriptions:
+  # - For field meanings, see api/v1/musicservice_types.go
+  # - For resource creation logic, see internal/builder/resource_builder.go
+  # - For autoscaling details, see internal/reconciler/app.go
+  replicas: 3
+  image: nginx:alpine
+  port: 8080
+  
+  storage:
+    size: 50Gi
+    updatePolicy: Recreate
+  
+  streaming:
+    bitrate: "320k"
+    maxConnections: 5000
+  
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  
+  autoscaling:
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 80
+  
+  database:
+    enabled: true
+    replicas: 2
+    image: mariadb:10.11
+    replication:
+      enabled: true
+      gtid: true
+    storage:
+      size: 20Gi
+      updatePolicy: Recreate
+    rootPassword: "miku-secret-pass"
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
