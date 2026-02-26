@@ -124,6 +124,17 @@ spec:
                     description: Enabled cho biết có triển khai cơ sở dữ liệu hay
                       không
                     type: boolean
+                  highAvailability:
+                    description: |-
+                      HighAvailability cấu hình Galera Cluster để tự động chuyển đổi dự phòng
+                      Khi bật, tất cả các node ngang hàng; nếu node master chết thì slave sẽ được đưa lên làm primary
+                    properties:
+                      enabled:
+                        description: |-
+                          Enabled bật chế độ Galera Cluster multi-master để tất cả các node ngang hàng
+                          Khi bật, bất kỳ node nào cũng có thể được đưa lên làm primary khi node hiện tại chết
+                        type: boolean
+                    type: object
                   image:
                     description: Image là image container của cơ sở dữ liệu
                     type: string

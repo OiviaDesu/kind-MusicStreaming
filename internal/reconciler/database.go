@@ -52,6 +52,100 @@ func NewDatabaseReconciler(c client.Client, b *builder.ResourceBuilder, f *tone.
 	}
 }
 
+// ReconcileGalera reconciles the Galera Cluster StatefulSet and Services
+// Khi HA được bật, tất cả các node ngang hàng; node chết sẽ không gây gián đoạn dịch vụ
+func (dr *DatabaseReconciler) ReconcileGalera(ctx context.Context, ms *musicv1.MusicService) error {
+	log := log.FromContext(ctx)
+
+	sts := &appsv1.StatefulSet{}
+	stsName := types.NamespacedName{
+		Name:      ms.Name + "-db-galera",
+		Namespace: ms.Namespace,
+	}
+
+	err := dr.client.Get(ctx, stsName, sts)
+	if err != nil && errors.IsNotFound(err) {
+		sts = dr.builder.BuildDatabaseGaleraStatefulSet(ms)
+		log.Info(dr.formatter.Format(ms, "Creating Galera Cluster StatefulSet"), "StatefulSet", stsName.Name)
+		return dr.client.Create(ctx, sts)
+	}
+	if err != nil {
+		return err
+	}
+
+	desiredSts := dr.builder.BuildDatabaseGaleraStatefulSet(ms)
+	storageChanged := storageSizeChanged(sts, desiredSts)
+	if storageChanged {
+		policy := storageUpdatePolicy(databaseStorageSpec(ms))
+		if policy == musicv1.StorageUpdatePolicyRecreate {
+			log.Info("Recreating Galera StatefulSet and PVCs due to storage size change", "StatefulSet", stsName.Name)
+			return recreateStatefulSetStorage(ctx, dr.client, sts, "db-data", ms.Name+"-db-galera")
+		}
+		if err := resizePVCs(ctx, dr.client, "db-data", ms.Name+"-db-galera", desiredSts); err != nil {
+			return err
+		}
+	}
+
+	if statefulSetNeedsUpdate(sts, desiredSts) {
+		log.Info("Updating Galera StatefulSet", "StatefulSet", stsName.Name)
+		sts.Spec = desiredSts.Spec
+		return dr.client.Update(ctx, sts)
+	}
+
+	return nil
+}
+
+// ReconcileGaleraServices reconciles the services for Galera Cluster
+func (dr *DatabaseReconciler) ReconcileGaleraServices(ctx context.Context, ms *musicv1.MusicService) error {
+	// Headless service for Galera cluster discovery
+	galeraHLSvc := &corev1.Service{}
+	galeraHLSvcName := types.NamespacedName{
+		Name:      ms.Name + "-db-galera",
+		Namespace: ms.Namespace,
+	}
+	if err := dr.client.Get(ctx, galeraHLSvcName, galeraHLSvc); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		galeraHLSvc = dr.builder.BuildDatabaseGaleraService(ms)
+		if err := dr.client.Create(ctx, galeraHLSvc); err != nil {
+			return err
+		}
+	}
+
+	// Primary (write) service – trỏ đến tất cả galera node để đảm bảo HA
+	primarySvc := &corev1.Service{}
+	primarySvcName := types.NamespacedName{
+		Name:      ms.Name + "-db-master",
+		Namespace: ms.Namespace,
+	}
+	if err := dr.client.Get(ctx, primarySvcName, primarySvc); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		primarySvc = dr.builder.BuildDatabaseGaleraPrimaryService(ms)
+		if err := dr.client.Create(ctx, primarySvc); err != nil {
+			return err
+		}
+	}
+
+	// Read service – trỏ đến tất cả galera node để phân tải đọc
+	readSvc := &corev1.Service{}
+	readSvcName := types.NamespacedName{
+		Name:      ms.Name + "-db-read",
+		Namespace: ms.Namespace,
+	}
+	if err := dr.client.Get(ctx, readSvcName, readSvc); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		readSvc = dr.builder.BuildDatabaseGaleraReadService(ms)
+		return dr.client.Create(ctx, readSvc)
+	}
+
+	return nil
+}
+
 // ReconcileMaster reconciles the database master StatefulSet
 func (dr *DatabaseReconciler) ReconcileMaster(ctx context.Context, ms *musicv1.MusicService) error {
 	log := log.FromContext(ctx)

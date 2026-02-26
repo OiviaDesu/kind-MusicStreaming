@@ -45,6 +45,8 @@ spec:
     replication:
       enabled: true
       gtid: true
+    highAvailability:
+      enabled: true
     storage:
       size: 20Gi
       updatePolicy: Recreate
